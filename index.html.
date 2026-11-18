@@ -1,0 +1,215 @@
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#243b35">
+<title>Caderno de Louvores</title>
+<style>
+body{font-family:Arial,sans-serif;background:#f5f1e8;color:#263b32;margin:0}
+header{background:#243b35;color:white;text-align:center;padding:25px}
+header h1{margin:0}
+main{max-width:650px;margin:25px auto;padding:15px}
+input,textarea,button{box-sizing:border-box;width:100%;padding:13px;margin:6px 0;border-radius:8px;font-size:16px}
+input,textarea{border:1px solid #bbb;background:white}
+textarea{min-height:180px}
+button{border:0;background:#315c4b;color:white;cursor:pointer}
+button.secondary{background:#777}
+button.danger{background:#a43d3d}
+.hino{background:white;padding:16px;margin:12px 0;border-radius:12px;box-shadow:0 2px 7px #0001}
+.hino h3{margin-top:0}
+.letra{white-space:pre-wrap;line-height:1.6}
+.hidden{display:none}
+small{color:#666}
+</style>
+</head>
+<body>
+<header>
+<h1>📖 Caderno de Louvores</h1>
+<p>Um lugar para guardar e compartilhar hinos</p>
+</header>
+
+<main>
+<input id="busca" placeholder="Pesquisar hino pelo título...">
+
+<p id="status"><small>Carregando hinos...</small></p>
+<section id="lista"></section>
+
+<hr>
+<h2>Área do administrador</h2>
+<form id="login">
+<input id="email" type="email" placeholder="Teu e-mail" required>
+<input id="senha" type="password" placeholder="Tua senha" required>
+<button type="submit">Entrar</button>
+</form>
+
+<section id="admin" class="hidden">
+<p>Administrador conectado.</p>
+<button class="secondary" id="sair">Sair</button>
+<h3 id="formTitulo">Adicionar novo hino</h3>
+<form id="formHino">
+<input id="titulo" placeholder="Título do hino" required>
+<textarea id="letra" placeholder="Escreve a letra do hino..." required></textarea>
+<button type="submit">Salvar hino</button>
+<button type="button" class="secondary hidden" id="cancelar">Cancelar edição</button>
+</form>
+</section>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+const SUPABASE_URL = "https://btfsxzcfcjcdfgdrsyav.supabase.co";
+const SUPABASE_KEY = "COLE_AQUI_SUA_CHAVE_PUBLICAVEL";
+const TABLE = "Hinos";
+
+const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+let session = null;
+let hinos = [];
+let editando = null;
+
+const $ = id => document.getElementById(id);
+
+function mostrarStatus(msg){ $("status").textContent = msg; }
+
+function escapar(s){
+ return String(s ?? "").replace(/[&<>"']/g,c=>({
+ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+ })[c]);
+}
+
+function salvarCache(){
+ try{ localStorage.setItem("caderno_hinos",JSON.stringify(hinos)); }catch(e){}
+}
+
+function mostrarHinos(){
+ const termo = $("busca").value.toLowerCase();
+ const lista = $("lista");
+ lista.innerHTML = "";
+ const filtrados = hinos.filter(h=>(h.titulo||"").toLowerCase().includes(termo));
+
+ if(!filtrados.length){
+  lista.textContent = "Nenhum hino encontrado.";
+  return;
+ }
+
+ filtrados.forEach(h=>{
+  const item = document.createElement("article");
+  item.className = "hino";
+  item.innerHTML = `<h3>${escapar(h.titulo)}</h3>
+    <div class="letra">${escapar(h.letra)}</div>`;
+  if(session){
+   const editar = document.createElement("button");
+   editar.textContent = "Editar";
+   editar.onclick = ()=>editarHino(h);
+   const excluir = document.createElement("button");
+   excluir.textContent = "Excluir";
+   excluir.className = "danger";
+   excluir.onclick = ()=>excluirHino(h.id);
+   item.append(editar,excluir);
+  }
+  lista.appendChild(item);
+ });
+}
+
+async function carregarHinos(){
+ try{
+  const {data,error} = await db.from(TABLE).select("*").order("id",{ascending:false});
+  if(error) throw error;
+  hinos = data || [];
+  salvarCache();
+  mostrarStatus("Hinos atualizados. Também ficam guardados neste aparelho.");
+ }catch(e){
+  try{hinos=JSON.parse(localStorage.getItem("caderno_hinos")||"[]");}
+  catch(err){hinos=[];}
+  mostrarStatus(navigator.onLine
+   ? "Não foi possível atualizar. Mostrando os hinos salvos."
+   : "Sem internet. Mostrando os hinos salvos neste aparelho.");
+ }
+ mostrarHinos();
+}
+
+function atualizarArea(){
+ $("login").classList.toggle("hidden",!!session);
+ $("admin").classList.toggle("hidden",!session);
+ mostrarHinos();
+}
+
+db.auth.getSession().then(({data})=>{
+ session=data.session;
+ atualizarArea();
+ carregarHinos();
+});
+
+db.auth.onAuthStateChange((_event,data)=>{
+ session=data;
+ atualizarArea();
+});
+
+$("login").addEventListener("submit",async e=>{
+ e.preventDefault();
+ const {error}=await db.auth.signInWithPassword({
+  email:$("email").value,
+  password:$("senha").value
+ });
+ if(error) alert("Não foi possível entrar: "+error.message);
+ else $("senha").value="";
+});
+
+$("sair").onclick=async()=>{
+ await db.auth.signOut();
+};
+
+function editarHino(h){
+ editando=h.id;
+ $("titulo").value=h.titulo;
+ $("letra").value=h.letra;
+ $("formTitulo").textContent="Editar hino";
+ $("cancelar").classList.remove("hidden");
+ window.scrollTo({top:document.body.scrollHeight,behavior:"smooth"});
+}
+
+$("cancelar").onclick=()=>{
+ editando=null;
+ $("formHino").reset();
+ $("formTitulo").textContent="Adicionar novo hino";
+ $("cancelar").classList.add("hidden");
+};
+
+$("formHino").addEventListener("submit",async e=>{
+ e.preventDefault();
+ if(!session){alert("Entre como administrador.");return;}
+ const registro={
+  titulo:$("titulo").value.trim(),
+  letra:$("letra").value.trim()
+ };
+ let resultado;
+ if(editando!==null){
+  resultado=await db.from(TABLE).update(registro).eq("id",editando);
+ }else{
+  resultado=await db.from(TABLE).insert(registro);
+ }
+ if(resultado.error){
+  alert("Erro ao salvar: "+resultado.error.message);
+  return;
+ }
+ $("formHino").reset();
+ editando=null;
+ $("formTitulo").textContent="Adicionar novo hino";
+ $("cancelar").classList.add("hidden");
+ await carregarHinos();
+ alert("Hino salvo!");
+});
+
+async function excluirHino(id){
+ if(!confirm("Deseja excluir este hino?"))return;
+ const {error}=await db.from(TABLE).delete().eq("id",id);
+ if(error){alert("Erro ao excluir: "+error.message);return;}
+ await carregarHinos();
+}
+
+$("busca").addEventListener("input",mostrarHinos);
+window.addEventListener("online",carregarHinos);
+</script>
+</body>
+</html>
